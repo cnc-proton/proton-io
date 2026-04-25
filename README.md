@@ -1,13 +1,13 @@
 CNC PROTON IO Component for LinuxCNC
 
-Highly optimized user-space HAL component for LinuxCNC designed to interface with CNC PROTON expansion modules via high-speed RS485 (Baudrate 460800).
+Highly optimized user-space HAL component for LinuxCNC designed to interface with CNC PROTON expansion modules via high-speed RS485 (Baudrate 750000).
 Why CNC PROTON IO?
 
 Standard Modbus components in LinuxCNC can be slow or complex to configure. This driver is hard-coded for speed and simplicity.
 
     Auto-Discovery: No need to manually define pins. The driver scans the bus and creates pins based on the connected module's hardware ID.
 
-    High Performance: Custom serial implementation bypasses standard overhead, supporting 460,800 bps for low-latency motion control.
+    High Performance: Custom serial implementation bypasses standard overhead, supporting 750 kbps for low-latency motion control.
 
     Robustness: Integrated hardware watchdog management and error-retry logic.
 
@@ -64,4 +64,4 @@ Once loaded, the driver creates pins following this structure:
 
 License
 
-[GPLv2 or later (Standard for LinuxCNC components)]
+GPLv2 or later (Standard for LinuxCNC components
