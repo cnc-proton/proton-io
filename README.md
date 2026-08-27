@@ -50,6 +50,10 @@ Parameters:
 
     -p [ms]: Transmission delay/polling interval (default: 10ms).
 
+    -to [ms]: Modbus response timeout on the LinuxCNC side (default: 30ms).
+
+    -cycle-us [us]: Delay between reading inputs and writing outputs for each module (default: 1000us).
+
 Auto-Generated Pins
 
 Once loaded, the driver creates pins following this structure:

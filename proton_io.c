@@ -8,6 +8,7 @@
 #include <termios.h>
 #include <poll.h>
 #include <sched.h>
+#include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <hal.h>
 #include <rtapi_math.h>
@@ -41,10 +42,11 @@ int hal_comp_id;
 int keep_running = 1;
 int wd_ticks = 10;
 int tx_delay = 10;
+int timeout_ms = 30;
+int cycle_delay_us = 1000;
 
 #define MAX_BOARDS 32
 #define MAX_IO_BITS 32
-#define TIMEOUT_MS 30
 
 // 1. Структура HAL-пинов (ОБЯЗАНА ЖИТЬ В SHARED MEMORY)
 struct hal_pins {
@@ -111,7 +113,7 @@ int modbus_transaction(int fd, uint8_t *tx_buf, int tx_len, uint8_t *rx_buf, int
 
     // Читаем с запасом до 5 байт мусора (expected_rx_len + 5)
     while (total_read < expected_rx_len + 5) {
-        if (poll(&pfd, 1, TIMEOUT_MS) > 0) {
+        if (poll(&pfd, 1, timeout_ms) > 0) {
             int n = read(fd, temp_buf + total_read, sizeof(temp_buf) - total_read);
             if (n > 0) {
                 total_read += n;
@@ -202,7 +204,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-wd") == 0 && i + 1 < argc) wd_ticks = atoi(argv[++i]);
         if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) tx_delay = atoi(argv[++i]);
+        if (strcmp(argv[i], "-to") == 0 && i + 1 < argc) timeout_ms = atoi(argv[++i]);
+        if (strcmp(argv[i], "-cycle-us") == 0 && i + 1 < argc) cycle_delay_us = atoi(argv[++i]);
     }
+    if (timeout_ms < 1) timeout_ms = 1;
+    if (cycle_delay_us < 0) cycle_delay_us = 0;
 
     hal_comp_id = hal_init("proton_io");
     if (hal_comp_id < 0) return -1;
@@ -214,7 +220,8 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    rtapi_print_msg(RTAPI_MSG_INFO, "Proton IO: Сканирование шины... (WD=%d, DELAY=%d)\n", wd_ticks, tx_delay);
+    rtapi_print_msg(RTAPI_MSG_INFO, "Proton IO: Сканирование шины... (WD=%d, DELAY=%d, TO=%dms, CYCLE=%dus)\n",
+                    wd_ticks, tx_delay, timeout_ms, cycle_delay_us);
 
     int boards_found = 0;
     for (int addr = 1; addr < MAX_BOARDS; addr++) {
@@ -255,8 +262,14 @@ int main(int argc, char **argv) {
         close(fd); hal_exit(hal_comp_id); return -1;
     }
 
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, "Proton IO: Не удалось заблокировать память: %s\n", strerror(errno));
+    }
+
     struct sched_param param = { .sched_priority = 90 };
-    sched_setscheduler(0, SCHED_FIFO, &param);
+    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, "Proton IO: Не удалось включить SCHED_FIFO: %s\n", strerror(errno));
+    }
 
     hal_ready(hal_comp_id); 
 
@@ -284,18 +297,26 @@ int main(int argc, char **argv) {
                 }
             }
 
-            usleep(1000);
+            if (cycle_delay_us > 0) usleep(cycle_delay_us);
 
             if (!write_register(fd, addr, 1, out_val)) {
                 comm_ok = 0;
             }
 
             if (comm_ok) {
+                if (*(boards[addr].pins->online) == 0) {
+                    rtapi_print_msg(RTAPI_MSG_INFO, "Proton IO: Связь с модулем ID=%d восстановлена\n", addr);
+                }
                 boards[addr].error_count = 0;
                 *(boards[addr].pins->online) = 1;
             } else {
                 boards[addr].error_count++;
-                if (boards[addr].error_count > 5) *(boards[addr].pins->online) = 0;
+                if (boards[addr].error_count > 5) {
+                    if (*(boards[addr].pins->online) != 0) {
+                        rtapi_print_msg(RTAPI_MSG_ERR, "Proton IO: Потеря связи с модулем ID=%d\n", addr);
+                    }
+                    *(boards[addr].pins->online) = 0;
+                }
             }
         }
     }
