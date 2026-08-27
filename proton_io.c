@@ -198,6 +198,13 @@ int create_board_pins(int addr) {
     return 0;
 }
 
+void clear_board_inputs(int addr) {
+    for (int p = 0; p < boards[addr].in_count; p++) {
+        *(boards[addr].pins->in[p]) = 0;
+        *(boards[addr].pins->in_not[p]) = 1;
+    }
+}
+
 void exit_handler() { keep_running = 0; }
 
 int main(int argc, char **argv) {
@@ -287,6 +294,9 @@ int main(int argc, char **argv) {
                     *(boards[addr].pins->in[p]) = bit_state;
                     *(boards[addr].pins->in_not[p]) = !bit_state;
                 }
+            } else {
+                // Не держим последнее состояние входов при потере чтения с модуля.
+                clear_board_inputs(addr);
             }
 
             uint16_t out_val = 0;
