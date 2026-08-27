@@ -52,9 +52,6 @@ struct hal_pins {
     hal_bit_t *in[MAX_IO_BITS];
     hal_bit_t *in_not[MAX_IO_BITS];
     hal_bit_t *out[MAX_IO_BITS];
-    hal_bit_t *input[MAX_IO_BITS];
-    hal_bit_t *input_not[MAX_IO_BITS];
-    hal_bit_t *output[MAX_IO_BITS];
 };
 
 // 2. Локальная структура программы (Живет в обычной памяти)
@@ -187,16 +184,6 @@ int create_board_pins(int addr) {
                                   "proton_io.board-%02d.in-%02d-not", addr, p);
         if (retval < 0) return retval;
         *(boards[addr].pins->in_not[p]) = 1;
-
-        // Человеческая 1-based нумерация: input-03 соответствует физическому входу 3.
-        retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->input[p]), hal_comp_id,
-                                  "proton_io.board-%02d.input-%02d", addr, p + 1);
-        if (retval < 0) return retval;
-        *(boards[addr].pins->input[p]) = 0;
-        retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->input_not[p]), hal_comp_id,
-                                  "proton_io.board-%02d.input-%02d-not", addr, p + 1);
-        if (retval < 0) return retval;
-        *(boards[addr].pins->input_not[p]) = 1;
     }
 
     for (int p = 0; p < boards[addr].out_count; p++) {
@@ -204,12 +191,6 @@ int create_board_pins(int addr) {
                                   "proton_io.board-%02d.out-%02d", addr, p);
         if (retval < 0) return retval;
         *(boards[addr].pins->out[p]) = 0;
-
-        // 1-based алиас можно использовать в HAL вместо out-02 для физического выхода 3.
-        retval = hal_pin_bit_newf(HAL_IN, &(boards[addr].pins->output[p]), hal_comp_id,
-                                  "proton_io.board-%02d.output-%02d", addr, p + 1);
-        if (retval < 0) return retval;
-        *(boards[addr].pins->output[p]) = 0;
     }
 
     return 0;
@@ -285,7 +266,7 @@ int main(int argc, char **argv) {
 
             uint16_t out_val = 0;
             for (int p = 0; p < boards[addr].out_count; p++) {
-                if (*(boards[addr].pins->out[p]) || *(boards[addr].pins->output[p])) out_val |= (1u << p);
+                if (*(boards[addr].pins->out[p])) out_val |= (1u << p);
             }
             write_register(fd, addr, 1, out_val);
 
@@ -299,8 +280,6 @@ int main(int argc, char **argv) {
                     int bit_state = (in_val[0] & (1 << p)) ? 1 : 0;
                     *(boards[addr].pins->in[p]) = bit_state;
                     *(boards[addr].pins->in_not[p]) = !bit_state;
-                    *(boards[addr].pins->input[p]) = bit_state;
-                    *(boards[addr].pins->input_not[p]) = !bit_state;
                 }
             } else {
                 boards[addr].error_count++;

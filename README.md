@@ -56,22 +56,11 @@ Once loaded, the driver creates pins following this structure:
 
     proton_io.board-XX.online: (Bit, Out) True if module is responding.
 
-    proton_io.board-XX.in-YY: (Bit, Out) State of digital input, zero-based legacy numbering.
+    proton_io.board-XX.in-YY: (Bit, Out) State of digital input.
 
-    proton_io.board-XX.in-YY-not: (Bit, Out) Inverted state of digital input, zero-based legacy numbering.
+    proton_io.board-XX.in-YY-not: (Bit, Out) Inverted state of digital input.
 
-    proton_io.board-XX.out-YY: (Bit, In) Connect your HAL signals here to drive physical outputs, zero-based legacy numbering.
-
-    proton_io.board-XX.input-YY: (Bit, Out) 1-based alias for physical digital input YY.
-
-    proton_io.board-XX.input-YY-not: (Bit, Out) 1-based inverted alias for physical digital input YY.
-
-    proton_io.board-XX.output-YY: (Bit, In) 1-based alias for physical digital output YY.
-
-Numbering example:
-
-    Physical module 4, input 3 can be read as proton_io.board-04.input-03.
-    The legacy equivalent is proton_io.board-04.in-02 because in/out pins start from 0.
+    proton_io.board-XX.out-YY: (Bit, In) Connect your HAL signals here to drive physical outputs.
 
 License
 
