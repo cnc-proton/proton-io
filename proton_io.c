@@ -44,6 +44,7 @@ int wd_ticks = 10;
 int tx_delay = 10;
 int timeout_ms = 30;
 int cycle_delay_us = 1000;
+int modbus_retries = 2;
 
 #define MAX_BOARDS 32
 #define MAX_IO_BITS 32
@@ -106,6 +107,7 @@ int setup_serial(const char *device) {
 int modbus_transaction(int fd, uint8_t *tx_buf, int tx_len, uint8_t *rx_buf, int expected_rx_len) {
     tcflush(fd, TCIFLUSH);
     if (write(fd, tx_buf, tx_len) != tx_len) return 0;
+    if (tcdrain(fd) != 0) return 0;
 
     int total_read = 0;
     struct pollfd pfd = { .fd = fd, .events = POLLIN };
@@ -145,7 +147,11 @@ int write_register(int fd, uint8_t addr, uint16_t reg, uint16_t val) {
     uint16_t crc = crc16(tx, 6);
     tx[6] = crc & 0xFF; tx[7] = crc >> 8;
     uint8_t rx[8];
-    return modbus_transaction(fd, tx, 8, rx, 8);
+    for (int attempt = 0; attempt <= modbus_retries; attempt++) {
+        if (attempt > 0 && cycle_delay_us > 0) usleep(cycle_delay_us);
+        if (modbus_transaction(fd, tx, 8, rx, 8)) return 1;
+    }
+    return 0;
 }
 
 int read_registers(int fd, uint8_t addr, uint16_t reg, uint16_t count, uint16_t *out_data) {
@@ -155,9 +161,12 @@ int read_registers(int fd, uint8_t addr, uint16_t reg, uint16_t count, uint16_t 
     int rx_len = 5 + (count * 2);
     uint8_t rx[32];
     
-    if (modbus_transaction(fd, tx, 8, rx, rx_len)) {
-        for (int i = 0; i < count; i++) out_data[i] = (rx[3 + i*2] << 8) | rx[4 + i*2];
-        return 1;
+    for (int attempt = 0; attempt <= modbus_retries; attempt++) {
+        if (attempt > 0 && cycle_delay_us > 0) usleep(cycle_delay_us);
+        if (modbus_transaction(fd, tx, 8, rx, rx_len)) {
+            for (int i = 0; i < count; i++) out_data[i] = (rx[3 + i*2] << 8) | rx[4 + i*2];
+            return 1;
+        }
     }
     return 0;
 }
@@ -213,9 +222,11 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) tx_delay = atoi(argv[++i]);
         if (strcmp(argv[i], "-to") == 0 && i + 1 < argc) timeout_ms = atoi(argv[++i]);
         if (strcmp(argv[i], "-cycle-us") == 0 && i + 1 < argc) cycle_delay_us = atoi(argv[++i]);
+        if (strcmp(argv[i], "-retries") == 0 && i + 1 < argc) modbus_retries = atoi(argv[++i]);
     }
     if (timeout_ms < 1) timeout_ms = 1;
     if (cycle_delay_us < 0) cycle_delay_us = 0;
+    if (modbus_retries < 0) modbus_retries = 0;
 
     hal_comp_id = hal_init("proton_io");
     if (hal_comp_id < 0) return -1;
@@ -227,8 +238,8 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    rtapi_print_msg(RTAPI_MSG_INFO, "Proton IO: Сканирование шины... (WD=%d, DELAY=%d, TO=%dms, CYCLE=%dus)\n",
-                    wd_ticks, tx_delay, timeout_ms, cycle_delay_us);
+    rtapi_print_msg(RTAPI_MSG_INFO, "Proton IO: Сканирование шины... (WD=%d, DELAY=%d, TO=%dms, CYCLE=%dus, RETRIES=%d)\n",
+                    wd_ticks, tx_delay, timeout_ms, cycle_delay_us, modbus_retries);
 
     int boards_found = 0;
     for (int addr = 1; addr < MAX_BOARDS; addr++) {

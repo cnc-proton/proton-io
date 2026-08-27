@@ -54,6 +54,8 @@ Parameters:
 
     -cycle-us [us]: Delay between reading inputs and writing outputs for each module (default: 1000us).
 
+    -retries [count]: Extra Modbus transaction retries after a failed frame (default: 2).
+
 Auto-Generated Pins
 
 Once loaded, the driver creates pins following this structure:
