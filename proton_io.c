@@ -43,14 +43,18 @@ int wd_ticks = 10;
 int tx_delay = 10;
 
 #define MAX_BOARDS 32
+#define MAX_IO_BITS 32
 #define TIMEOUT_MS 30
 
 // 1. Структура HAL-пинов (ОБЯЗАНА ЖИТЬ В SHARED MEMORY)
 struct hal_pins {
     hal_bit_t *online;
-    hal_bit_t *in[32];
-    hal_bit_t *in_not[32];
-    hal_bit_t *out[32];
+    hal_bit_t *in[MAX_IO_BITS];
+    hal_bit_t *in_not[MAX_IO_BITS];
+    hal_bit_t *out[MAX_IO_BITS];
+    hal_bit_t *input[MAX_IO_BITS];
+    hal_bit_t *input_not[MAX_IO_BITS];
+    hal_bit_t *output[MAX_IO_BITS];
 };
 
 // 2. Локальная структура программы (Живет в обычной памяти)
@@ -159,6 +163,58 @@ int read_registers(int fd, uint8_t addr, uint16_t reg, uint16_t count, uint16_t 
     return 0;
 }
 
+int create_board_pins(int addr) {
+    int retval;
+
+    boards[addr].pins = hal_malloc(sizeof(struct hal_pins));
+    if (boards[addr].pins == NULL) {
+        rtapi_print_msg(RTAPI_MSG_ERR, "Proton IO: Нет HAL shared memory для модуля ID=%d\n", addr);
+        return -ENOMEM;
+    }
+    memset(boards[addr].pins, 0, sizeof(struct hal_pins));
+
+    retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->online), hal_comp_id,
+                              "proton_io.board-%02d.online", addr);
+    if (retval < 0) return retval;
+    *(boards[addr].pins->online) = 1;
+
+    for (int p = 0; p < boards[addr].in_count; p++) {
+        retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->in[p]), hal_comp_id,
+                                  "proton_io.board-%02d.in-%02d", addr, p);
+        if (retval < 0) return retval;
+        *(boards[addr].pins->in[p]) = 0;
+        retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->in_not[p]), hal_comp_id,
+                                  "proton_io.board-%02d.in-%02d-not", addr, p);
+        if (retval < 0) return retval;
+        *(boards[addr].pins->in_not[p]) = 1;
+
+        // Человеческая 1-based нумерация: input-03 соответствует физическому входу 3.
+        retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->input[p]), hal_comp_id,
+                                  "proton_io.board-%02d.input-%02d", addr, p + 1);
+        if (retval < 0) return retval;
+        *(boards[addr].pins->input[p]) = 0;
+        retval = hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->input_not[p]), hal_comp_id,
+                                  "proton_io.board-%02d.input-%02d-not", addr, p + 1);
+        if (retval < 0) return retval;
+        *(boards[addr].pins->input_not[p]) = 1;
+    }
+
+    for (int p = 0; p < boards[addr].out_count; p++) {
+        retval = hal_pin_bit_newf(HAL_IN, &(boards[addr].pins->out[p]), hal_comp_id,
+                                  "proton_io.board-%02d.out-%02d", addr, p);
+        if (retval < 0) return retval;
+        *(boards[addr].pins->out[p]) = 0;
+
+        // 1-based алиас можно использовать в HAL вместо out-02 для физического выхода 3.
+        retval = hal_pin_bit_newf(HAL_IN, &(boards[addr].pins->output[p]), hal_comp_id,
+                                  "proton_io.board-%02d.output-%02d", addr, p + 1);
+        if (retval < 0) return retval;
+        *(boards[addr].pins->output[p]) = 0;
+    }
+
+    return 0;
+}
+
 void exit_handler() { keep_running = 0; }
 
 int main(int argc, char **argv) {
@@ -183,13 +239,19 @@ int main(int argc, char **argv) {
     for (int addr = 1; addr < MAX_BOARDS; addr++) {
         uint16_t reg_data[4];
         if (read_registers(fd, addr, 0, 4, reg_data)) {
-            boards[addr].active = 1;
-            boards[addr].type = reg_data[3];
+            int retval;
+            int type = reg_data[3];
             
-            if (boards[addr].type == 1) { boards[addr].in_count = 8; boards[addr].out_count = 16; }
-            else if (boards[addr].type == 2) { boards[addr].in_count = 8; boards[addr].out_count = 8; }
-            else if (boards[addr].type == 3) { boards[addr].in_count = 16; boards[addr].out_count = 8; }
-            else continue;
+            if (type == 1) { boards[addr].in_count = 8; boards[addr].out_count = 16; }
+            else if (type == 2) { boards[addr].in_count = 8; boards[addr].out_count = 8; }
+            else if (type == 3) { boards[addr].in_count = 16; boards[addr].out_count = 8; }
+            else {
+                rtapi_print_msg(RTAPI_MSG_ERR, "Proton IO: Модуль ID=%d вернул неизвестный тип %d, пропуск\n", addr, type);
+                continue;
+            }
+
+            boards[addr].active = 1;
+            boards[addr].type = type;
 
             boards_found++;
             rtapi_print_msg(RTAPI_MSG_INFO, "Proton IO: Найден модуль ID=%d (Тип: %d)\n", addr, boards[addr].type);
@@ -197,18 +259,12 @@ int main(int argc, char **argv) {
             write_register(fd, addr, 2, wd_ticks); usleep(2000);
             write_register(fd, addr, 3, tx_delay); usleep(2000);
 
-            // ИСПРАВЛЕНИЕ ПАМЯТИ: Выделяем кусок Shared Memory под указатели
-            boards[addr].pins = hal_malloc(sizeof(struct hal_pins));
-            
-            hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->online), hal_comp_id, "proton_io.board-%02d.online", addr);
-            *(boards[addr].pins->online) = 1;
-
-            for (int p = 0; p < boards[addr].in_count; p++) {
-                hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->in[p]), hal_comp_id, "proton_io.board-%02d.in-%02d", addr, p);
-                hal_pin_bit_newf(HAL_OUT, &(boards[addr].pins->in_not[p]), hal_comp_id, "proton_io.board-%02d.in-%02d-not", addr, p);
-            }
-            for (int p = 0; p < boards[addr].out_count; p++) {
-                hal_pin_bit_newf(HAL_IN, &(boards[addr].pins->out[p]), hal_comp_id, "proton_io.board-%02d.out-%02d", addr, p);
+            retval = create_board_pins(addr);
+            if (retval < 0) {
+                rtapi_print_msg(RTAPI_MSG_ERR, "Proton IO: Ошибка создания HAL-пинов для ID=%d: %d\n", addr, retval);
+                close(fd);
+                hal_exit(hal_comp_id);
+                return -1;
             }
         }
     }
@@ -229,7 +285,7 @@ int main(int argc, char **argv) {
 
             uint16_t out_val = 0;
             for (int p = 0; p < boards[addr].out_count; p++) {
-                if (*(boards[addr].pins->out[p])) out_val |= (1 << p);
+                if (*(boards[addr].pins->out[p]) || *(boards[addr].pins->output[p])) out_val |= (1u << p);
             }
             write_register(fd, addr, 1, out_val);
 
@@ -243,6 +299,8 @@ int main(int argc, char **argv) {
                     int bit_state = (in_val[0] & (1 << p)) ? 1 : 0;
                     *(boards[addr].pins->in[p]) = bit_state;
                     *(boards[addr].pins->in_not[p]) = !bit_state;
+                    *(boards[addr].pins->input[p]) = bit_state;
+                    *(boards[addr].pins->input_not[p]) = !bit_state;
                 }
             } else {
                 boards[addr].error_count++;
