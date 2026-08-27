@@ -264,23 +264,35 @@ int main(int argc, char **argv) {
         for (int addr = 1; addr < MAX_BOARDS; addr++) {
             if (!boards[addr].active) continue;
 
-            uint16_t out_val = 0;
-            for (int p = 0; p < boards[addr].out_count; p++) {
-                if (*(boards[addr].pins->out[p])) out_val |= (1u << p);
-            }
-            write_register(fd, addr, 1, out_val);
-
-            usleep(1000); 
-
             uint16_t in_val[1] = {0};
-            if (read_registers(fd, addr, 0, 1, in_val)) {
-                boards[addr].error_count = 0;
-                *(boards[addr].pins->online) = 1;
+            int read_ok = read_registers(fd, addr, 0, 1, in_val);
+            int comm_ok = read_ok;
+
+            if (read_ok) {
                 for (int p = 0; p < boards[addr].in_count; p++) {
                     int bit_state = (in_val[0] & (1 << p)) ? 1 : 0;
                     *(boards[addr].pins->in[p]) = bit_state;
                     *(boards[addr].pins->in_not[p]) = !bit_state;
                 }
+            }
+
+            uint16_t out_val = 0;
+            // Если входы не читаются, связь с модулем сомнительна: гасим выходы безопасным нулем.
+            if (read_ok && boards[addr].error_count <= 5) {
+                for (int p = 0; p < boards[addr].out_count; p++) {
+                    if (*(boards[addr].pins->out[p])) out_val |= (1u << p);
+                }
+            }
+
+            usleep(1000);
+
+            if (!write_register(fd, addr, 1, out_val)) {
+                comm_ok = 0;
+            }
+
+            if (comm_ok) {
+                boards[addr].error_count = 0;
+                *(boards[addr].pins->online) = 1;
             } else {
                 boards[addr].error_count++;
                 if (boards[addr].error_count > 5) *(boards[addr].pins->online) = 0;
