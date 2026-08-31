@@ -1,32 +1,31 @@
-# Имя исходного файла
+# Source file name
 SRC = main.c
-# Имя выходного файла (без расширения)
+# Output file name (without extension)
 TARGET = modbus_cni
 
-# Инструменты
+# Tools
 CC = sdcc
 PACK = packihx
 PROGRAMMER = minipro
 
-# Флаги компилятора (указываем архитектуру 8051)
+# Compiler flags (8051 architecture)
 CFLAGS = -mmcs51
 
-# Сборка по умолчанию (если просто написать make)
+# Default build target (run `make`)
 all: $(TARGET).hex
 
-# Правило создания .hex из .ihx
+# Create .hex from .ihx
 $(TARGET).hex: $(TARGET).ihx
 	$(PACK) $(TARGET).ihx > $(TARGET).hex
 
-# Правило компиляции .ihx из .c
+# Compile .ihx from .c
 $(TARGET).ihx: $(SRC)
 	$(CC) $(CFLAGS) $(SRC) -o $(TARGET).ihx
 
-# Команда для очистки папки от временного мусора
+# Remove build artifacts
 clean:
 	rm -f *.asm *.lst *.mem *.rel *.rst *.sym *.ihx *.hex *.map *.lk
 
-# Команда для прошивки в один клик (когда спаяешь переходник!)
+# Flash the MCU in one step (requires programmer adapter)
 flash: $(TARGET).hex
 	$(PROGRAMMER) -p AT89S52 -i -w $(TARGET).hex
-
